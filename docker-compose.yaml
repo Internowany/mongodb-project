@@ -1,0 +1,172 @@
+services:
+  mongo1:
+    image: mongo:7.0.17
+    labels:
+      database: "mongodb"
+    hostname: mongo1
+    container_name: mongo1
+    restart: always
+    command: ["mongod", "--replSet", "rs0", "--bind_ip", "localhost,mongo1", "--keyFile", "/etc/mongo-keyfile", "--tlsMode", "requireTLS", "--tlsCertificateKeyFile", "/etc/ssl/mongo.pem", "--tlsCAFile", "/etc/ssl/ca.crt"]
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_admin_password
+    volumes:
+      - mongo1_data:/data/db
+      - mongo_logs:/var/log/mongodb
+      - ./mongodb/mongo-keyfile:/etc/mongo-keyfile:ro
+      - ./mongodb/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - ./mongodb/mongod.conf:/etc/mongod.conf:ro
+      - ./tls:/etc/ssl
+    networks:
+      - mongo_net
+    secrets:
+      - mongo_admin_password
+  mongo2:
+    image: mongo:7.0.17
+    labels:
+      database: "mongodb"
+    hostname: mongo2
+    container_name: mongo2
+    restart: always
+    command: ["mongod", "--replSet", "rs0", "--bind_ip", "localhost,mongo2", "--keyFile", "/etc/mongo-keyfile", "--tlsMode", "requireTLS", "--tlsCertificateKeyFile", "/etc/ssl/mongo.pem", "--tlsCAFile", "/etc/ssl/ca.crt"]
+    ports:
+      - "27018:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_admin_password
+    volumes:
+      - mongo2_data:/data/db
+      - mongo_logs:/var/log/mongodb
+      - ./mongodb/mongo-keyfile:/etc/mongo-keyfile:ro
+      - ./mongodb/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - ./mongodb/mongod.conf:/etc/mongod.conf:ro
+      - ./tls:/etc/ssl
+    networks:
+      - mongo_net
+    secrets:
+      - mongo_admin_password
+  mongo3:
+    image: mongo:7.0.17
+    labels:
+      database: "mongodb"
+    hostname: mongo3
+    container_name: mongo3
+    restart: always
+    command: ["mongod", "--replSet", "rs0", "--bind_ip", "localhost,mongo3", "--keyFile", "/etc/mongo-keyfile", "--tlsMode", "requireTLS", "--tlsCertificateKeyFile", "/etc/ssl/mongo.pem", "--tlsCAFile", "/etc/ssl/ca.crt"]
+    ports:
+      - "27019:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD_FILE: /run/secrets/mongo_admin_password
+    volumes:
+      - mongo3_data:/data/db
+      - mongo_logs:/var/log/mongodb
+      - ./mongodb/mongo-keyfile:/etc/mongo-keyfile:ro
+      - ./mongodb/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+      - ./mongodb/mongod.conf:/etc/mongod.conf:ro
+      - ./tls:/etc/ssl
+    networks:
+      - mongo_net
+    secrets:
+      - mongo_admin_password
+  mongosetup:
+    image: mongo:7.0.17
+    container_name: mongosetup
+    depends_on:
+      - mongo1
+      - mongo2
+      - mongo3
+    volumes:
+      - ./mongodb/mongo_setup.sh:/scripts/mongo_setup.sh
+      - ./tls:/etc/ssl
+    restart: "no"
+    entrypoint: ["bash", "/scripts/mongo_setup.sh"]
+    networks:
+      - mongo_net
+    secrets:
+      - mongo_admin_password
+  mongo-exporter:
+    image: 'percona/mongodb_exporter:0.40.0'
+    container_name: mongo-exporter
+    environment:
+      MONGODB_PASS: ${MONGODB_PASS}
+      MONGODB_URI: mongodb://admin:${MONGODB_PASS}@mongo1:27017/?tls=true&tlsCAFile=/etc/ssl/ca.crt&tlsCertificateKeyFile=/etc/ssl/mongo.pem
+    volumes:
+      - ./tls:/etc/ssl
+      - ./mongo-exporter/entrypoint.sh:/entrypoint.sh
+    command: ["--collect-all", "--compatible-mode", "--discovering-mode"]
+    networks:
+      - mongo_net
+  grafana:
+    image: grafana/grafana:9.5.20
+    container_name: grafana
+    restart: always
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+    networks:
+      - mongo_net
+  nginx:
+    image: nginx:1.27.4
+    container_name: nginx
+    ports:
+      - "443:443"
+    volumes:
+      - ./grafana/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./grafana/tls:/etc/nginx/ssl:ro
+    networks:
+      - mongo_net
+    depends_on:
+      - grafana
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: prometheus
+    restart: always
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prom_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    networks:
+      - mongo_net
+  loki:
+    image: grafana/loki:2.9.12
+    container_name: loki
+    restart: always
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - mongo_net
+  promtail:
+    image: grafana/promtail:2.9.12
+    container_name: promtail
+    restart: always
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml
+      - mongo_logs:/var/log/mongodb:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - mongo_net
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+  mongo_logs:
+  grafana_data:
+  prom_data:
+  loki_data:
+
+networks:
+  mongo_net:
+
+secrets:
+  mongo_admin_password:
+    file: ./secrets/mongo_admin_password
